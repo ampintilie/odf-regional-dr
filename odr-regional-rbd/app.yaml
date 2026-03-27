@@ -282,6 +282,6 @@ metadata:
   name: postgres-secret
 type: Opaque
 stringData:
-  POSTGRES_USER: admin
-  POSTGRES_PASSWORD: redhat123
-  POSTGRES_DB: bookdb
+  POSTGRESQL_USER: admin
+  POSTGRESQL_PASSWORD: redhat123
+  POSTGRESQL_DATABASE: bookdb
