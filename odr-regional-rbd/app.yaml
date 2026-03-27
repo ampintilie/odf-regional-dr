@@ -1,0 +1,287 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: book-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: book-app
+  template:
+    metadata:
+      labels:
+        app: book-app
+    spec:
+      containers:
+        - name: book-app
+          image: registry.redhat.io/ubi9/python-311:9.7
+          command: ["sh", "-c"]
+          args:
+            - |
+              pip install --no-cache-dir --prefix=/tmp flask psycopg2-binary && \
+              export PYTHONPATH=/tmp/lib/python3.11/site-packages && \
+              python /app/app.py
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: app-code         # Mount the ConfigMap here
+              mountPath: /app        # App will read from /app/app.py
+          workingDir: /app           # Optional, ensures current path is /app
+      volumes:
+        - name: app-code
+          configMap:
+            name: book-app-code      # This must match the ConfigMap name
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: book-app-code
+data:
+  app.py: |
+    from flask import Flask, request, render_template_string
+    import psycopg2
+    import os
+
+    app = Flask(__name__)
+
+    def get_connection():
+        return psycopg2.connect(
+            host=os.environ["DB_HOST"],
+            port=os.environ["DB_PORT"],
+            dbname=os.environ["DB_NAME"],
+            user=os.environ["DB_USER"],
+            password=os.environ["DB_PASSWORD"]
+        )
+
+    # Initialize database (safe on restarts)
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS books (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    author TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+
+    HTML_PAGE = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Book App</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 40px;
+            }
+            h1, h2 {
+                color: #333;
+            }
+            form {
+                margin-bottom: 30px;
+            }
+            input[type=text] {
+                padding: 5px;
+                margin: 5px 0;
+                width: 300px;
+            }
+            input[type=submit] {
+                padding: 6px 12px;
+                margin-top: 10px;
+            }
+            ul {
+                list-style-type: square;
+            }
+            li {
+                margin: 6px 0;
+            }
+        </style>
+    </head>
+    <body>
+
+        <h1>Add a Book</h1>
+
+        <form method="post" action="/add">
+            <label>
+                Title:
+                <input type="text" name="title">
+            </label>
+            <br>
+            <label>
+                Author:
+                <input type="text" name="author">
+            </label>
+            <br>
+            <input type="submit" value="Add">
+        </form>
+
+        <h2>Books in database</h2>
+
+        <ul>
+            {% for book in books %}
+                <li>
+                    <strong>{{ book[1] }}</strong>
+                    — {{ book[2] }}
+                </li>
+            {% else %}
+                <li>No books yet.</li>
+            {% endfor %}
+        </ul>
+
+    </body>
+    </html>
+    """
+
+    @app.route("/")
+    def form():
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM books ORDER BY id DESC")
+                books = cur.fetchall()
+        return render_template_string(HTML_PAGE, books=books)
+
+    @app.route("/add", methods=["POST"])
+    def add():
+        title = request.form["title"]
+        author = request.form["author"]
+
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO books (title, author) VALUES (%s, %s)",
+                    (title, author)
+                )
+                conn.commit()
+
+        return "<h2>Book added!</h2><a href='/'>Back</a>"
+
+    if __name__ == "__main__":
+        app.run(host="0.0.0.0", port=5000)
+
+  requirements.txt: |
+    flask
+    psycopg2-binary
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: book-app
+spec:
+  to:
+    kind: Service
+    name: book-app
+  port:
+    targetPort: 5000
+  tls:
+    termination: edge
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: book-app
+spec:
+  selector:
+    app: book-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  labels:
+    app.kubernetes.io/part-of: my-app
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ocs-storagecluster-ceph-rbd
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      initContainers:
+        - name: fix-permissions
+          image: registry.connect.redhat.com/sumologic/busybox:1.37.0-ubi
+          command: ["sh", "-c", "mkdir -p /var/lib/postgresql/data/pgdata && chmod -R 777 /var/lib/postgresql/data/pgdata"]
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+      containers:
+        - name: postgres
+          image: registry.redhat.io/rhel9/postgresql-15:9.7
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_INITDB_ARGS
+              value: "--allow-group-access"
+          envFrom:
+            - secretRef:
+                name: postgres-secret
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: pgdata
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+type: Opaque
+stringData:
+  POSTGRES_USER: admin
+  POSTGRES_PASSWORD: redhat123
+  POSTGRES_DB: bookdb
