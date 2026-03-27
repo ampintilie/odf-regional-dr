@@ -19,8 +19,8 @@ spec:
           command: ["sh", "-c"]
           args:
             - |
-              pip install --no-cache-dir --prefix=/tmp flask psycopg2-binary && \
-              export PYTHONPATH=/tmp/lib/python3.11/site-packages && \
+              pip install --no-cache-dir --target=/tmp flask psycopg2-binary && \
+              export PYTHONPATH=/tmp && \
               python /app/app.py
           env:
             - name: DB_HOST
@@ -31,17 +31,17 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
-                  key: POSTGRES_USER
+                  key: POSTGRESQL_USER
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
-                  key: POSTGRES_PASSWORD
+                  key: POSTGRESQL_PASSWORD
             - name: DB_NAME
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
-                  key: POSTGRES_DB
+                  key: POSTGRESQL_DB
           ports:
             - containerPort: 5000
           volumeMounts:
