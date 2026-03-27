@@ -237,6 +237,8 @@ spec:
       labels:
         app: postgres
     spec:
+      securityContext:
+        fsGroup: 26
       initContainers:
         - name: fix-permissions
           image: registry.connect.redhat.com/sumologic/busybox:1.37.0-ubi
