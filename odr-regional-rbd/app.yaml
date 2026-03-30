@@ -228,7 +228,6 @@ kind: Deployment
 metadata:
   name: postgres
 spec:
-  serviceAccountName: postgres-sa
   replicas: 1
   selector:
     matchLabels:
@@ -238,6 +237,7 @@ spec:
       labels:
         app: postgres
     spec:
+      serviceAccountName: postgres-sa
       containers:
         - name: postgres
           image: registry.redhat.io/rhel9/postgresql-15:9.7
@@ -279,6 +279,11 @@ stringData:
   POSTGRESQL_USER: admin
   POSTGRESQL_PASSWORD: redhat123
   POSTGRESQL_DATABASE: bookdb
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-sa
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
