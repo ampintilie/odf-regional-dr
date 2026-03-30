@@ -243,11 +243,6 @@ spec:
         app: postgres
     spec:
       serviceAccountName: postgres-sa
-      securityContext:
-        runAsUser: 1001
-        runAsGroup: 1001
-        fsGroup: 1001
-        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: postgres
           image: registry.redhat.io/rhel9/postgresql-15:9.7
@@ -263,7 +258,7 @@ spec:
             - containerPort: 5432
           volumeMounts:
             - name: pgdata
-              mountPath: /var/lib/pgsql/data
+              mountPath: /var/lib/pgsql
       volumes:
         - name: pgdata
           persistentVolumeClaim:
